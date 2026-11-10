@@ -322,7 +322,7 @@
   function existingKeys() { return data.expenses.map((x) => x.key || CSV.entryKey(x.date, x.amount, x.memo || "")); }
   function rebuildCandidates() {
     const imp = ui.imp;
-    imp.cands = CSV.buildCandidates(imp.analysis, imp.map, { existingKeys: existingKeys(), fixedNames: data.fixed.filter((f) => !f.end).map((f) => f.name) });
+    imp.cands = CSV.buildCandidates(imp.analysis, imp.map, { existingKeys: existingKeys(), fixedNames: data.fixed.filter((f) => !f.end).map((f) => f.name), fixed: data.fixed.filter((f) => !f.end) });
     renderImport();
   }
   function renderImport() {

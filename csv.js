@@ -161,12 +161,13 @@
     { re: /SPOTIFY/, name: "Spotify" },
     { re: /DMM/, name: "DMM TV" },
     { re: /(日本通信|ニホンツウシン|ニツポンツウシン|B-MOBILE)/, name: "日本通信SIM" },
-    { re: /GOOGLE ?PLAY/, name: "Google Play（DMM TVの支払いの可能性）" },
   ];
+  const STORE_BILLING = /(GOOGLE ?PLAY|APPLE\.COM|ITUNES)/;
+  const SUBSCRIPTION = /(MICROSOFT ?365|MICROSOFT\*|NETFLIX|YOUTUBE ?PREMIUM|AMAZON ?PRIME|プライム会費|U-NEXT|ABEMA|DAZN|HULU|DISNEY)/;
   const CATS = [
-    ["食費", /(セブン|ロ[-ー－]?ソン|ファミリ[-ー－]?マ[-ー－]?ト|ファミマ|ミニストップ|デイリ[-ー－]?ヤマザキ|NEWDAYS|ニュ[-ー－]?デイズ|松屋|マツヤ|すき家|スキヤ|吉野家|ヨシノヤ|なか卯|マクドナルド|MCDONALD|モスバ[-ー－]?ガ[-ー－]|ケンタッキ|ガスト|サイゼリヤ|スタ[-ー－]?バックス|STARBUCKS|ドト[-ー－]?ル|タリ[-ー－]?ズ|コメダ|西友|イオン|AEON|ライフ|マルエツ|ヤオコ[-ー－]|ベルク|ベイシア|業務ス[-ー－]?パ[-ー－]|ス[-ー－]?パ[-ー－]|UBER ?EATS|出前館|ウ[-ー－]?バ[-ー－]イ[-ー－]ツ|食堂|ラ[-ー－]?メン|弁当)/],
+    ["食費", /(東武ストア|東急ストア|西友|まいばすけっと|カフェ|CAFE|クリエ|コ[-ー－]ヒ[-ー－]|セブン|ロ[-ー－]?ソン|ファミリ[-ー－]?マ[-ー－]?ト|ファミマ|ミニストップ|デイリ[-ー－]?ヤマザキ|NEWDAYS|ニュ[-ー－]?デイズ|松屋|マツヤ|すき家|スキヤ|吉野家|ヨシノヤ|なか卯|マクドナルド|MCDONALD|モスバ[-ー－]?ガ[-ー－]|ケンタッキ|ガスト|サイゼリヤ|スタ[-ー－]?バックス|STARBUCKS|ドト[-ー－]?ル|タリ[-ー－]?ズ|コメダ|西友|イオン|AEON|ライフ|マルエツ|ヤオコ[-ー－]|ベルク|ベイシア|業務ス[-ー－]?パ[-ー－]|ス[-ー－]?パ[-ー－]|UBER ?EATS|出前館|ウ[-ー－]?バ[-ー－]イ[-ー－]ツ|食堂|ラ[-ー－]?メン|弁当)/],
     ["交通", /(JR|旅客鉄道|SUICA|スイカ|PASMO|パスモ|メトロ|東武|西武|京急|京王|小田急|東急|都営|バス|タクシ[-ー－]|^GO$|GOタクシ)/],
-    ["日用品", /(マツモトキヨシ|マツキヨ|ウエルシア|ドラッグ|スギ薬局|ツルハ|サンドラッグ|ココカラ|ダイソ[-ー－]|DAISO|セリア|キャンドゥ|ニトリ|無印|MUJI|カインズ|ホ[-ー－]ムセンタ)/],
+    ["日用品", /(薬局|ヤツキヨク|ヤッキョク|マツモトキヨシ|マツキヨ|ウエルシア|ドラッグ|スギ薬局|ツルハ|サンドラッグ|ココカラ|ダイソ[-ー－]|DAISO|セリア|キャンドゥ|ニトリ|無印|MUJI|カインズ|ホ[-ー－]ムセンタ)/],
     ["趣味・娯楽", /(STEAM|VALVE|NINTENDO|ニンテンド|PLAYSTATION|SONY INTERACTIVE|アニメイト|ゲ[-ー－]マ[-ー－]ズ|メロンブックス|とらのあな|TSUTAYA|ツタヤ|カラオケ|映画|TOHO|シネマ|ヨドバシ|ビックカメラ|ドスパラ|ツクモ|パソコン工房|ソフマップ|APPLE\.COM|YOUTUBE)/],
     ["学業", /(書店|丸善|ジュンク堂|紀伊國屋|紀伊国屋|生協|COOP|大学|立教)/],
     ["衣服", /(ユニクロ|UNIQLO|^GU$|ジ[-ー－]ユ[-ー－]|ZARA|しまむら|H&M|ABCマ[-ー－]ト)/],
@@ -203,9 +204,14 @@
       const d = norm(desc);
       let note = "", checked = true;
       const key = entryKey(date, amount, desc);
-      const fixedHit = FIXED_ALIASES.find((a) => a.re.test(d)) || (fixedNames.find((n) => d.indexOf(n) > -1) ? { name: fixedNames.find((n) => d.indexOf(n) > -1) } : null);
+      let fixedHit = FIXED_ALIASES.find((a) => a.re.test(d)) || (fixedNames.find((n) => d.indexOf(n) > -1) ? { name: fixedNames.find((n) => d.indexOf(n) > -1) } : null);
+      if (!fixedHit && STORE_BILLING.test(d)) {
+        const same = (ctx.fixed || []).find((f) => Number(f.amount) === amount);
+        fixedHit = { name: same ? same.name + "と同じ金額。ストア経由の支払い" : "ストア経由のサブスクや購入" };
+      }
       if (existing.has(key) || seen.has(key)) { note = "取り込み済み"; checked = false; }
       else if (fixedHit) { note = "固定費と重なる可能性（" + fixedHit.name + "）"; checked = false; }
+      else if (SUBSCRIPTION.test(d)) { note = "サブスクの可能性。毎月払うなら固定費に登録してください"; }
       else if (map.kind === "bank" && CARD_PAYMENT.test(d)) { note = "カードの引き落とし。カード明細と二重になります"; checked = false; }
       else if (map.kind === "bank" && ATM.test(d)) { note = "現金の引き出し。現金で使った分を手入力するなら外したままに"; checked = false; }
       else if (amount < 0) { note = "返金・取消"; }
