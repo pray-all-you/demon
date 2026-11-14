@@ -3,6 +3,7 @@
   const VAR_CATS = ["食費", "日用品", "交通", "趣味・娯楽", "交際", "学業", "衣服", "その他"];
   const FIXED_CATS = ["サブスク", "通信", "その他"];
   const CSV = window.KakeiboCSV;
+  const DEMO = !!window.KAKEIBO_DEMO;
   const $ = (id) => document.getElementById(id);
   const yen = (n) => (n < 0 ? "-¥" : "¥") + Math.abs(Math.round(n)).toLocaleString("ja-JP");
   const pad = (n) => String(n).padStart(2, "0");
@@ -10,10 +11,17 @@
   const todayStr = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-  const data = { version: 1, fixed: [], expenses: [], budget: null, lastBackup: null };
-  const ui = { ym: todayStr.slice(0, 7), cat: "食費", editingFixed: null, addingFixed: false, editorKey: undefined, editorEl: null, imp: null };
+  const data = { version: 1, fixed: [], expenses: [], budget: null, lastBackup: null, hideRules: ["DMM"], rulesApplied: 0 };
+  const ui = { ym: todayStr.slice(0, 7), cat: "食費", editingFixed: null, addingFixed: false, editorKey: undefined, editorEl: null, imp: null, peek: false };
 
-  // ---------- storage (IndexedDB, localStorage fallback) ----------
+  // 店名・メモにこの文字列が入っているものは、記録した時点で「一覧に表示しない」にする
+  function matchesHideRule(text) {
+    const t = CSV.norm(text || "");
+    return (data.hideRules || []).some((r) => r && t.indexOf(CSV.norm(r)) > -1);
+  }
+  const visible = (x) => ui.peek || !x.hidden;
+
+  // ---------- storage (IndexedDB, localStorage fallback; memory only in the demo) ----------
   let idb = null, storageMode = "none";
   function openIDB() {
     return new Promise((res, rej) => {
@@ -37,10 +45,12 @@
     });
   }
   async function load() {
+    if (DEMO) { storageMode = "memory"; Object.assign(data, window.KAKEIBO_DEMO_DATA || {}); return; }
     try { idb = await openIDB(); const v = await idbGet("state"); storageMode = "idb"; if (v) Object.assign(data, v); return; } catch (e) { idb = null; }
     try { const v = localStorage.getItem("kakeibo-state"); storageMode = "ls"; if (v) Object.assign(data, JSON.parse(v)); } catch (e) { storageMode = "none"; }
   }
   async function save() {
+    if (storageMode === "memory") return true;
     const snap = JSON.parse(JSON.stringify(data));
     try {
       if (storageMode === "idb") await idbPut("state", snap);
@@ -72,7 +82,7 @@
   function setStatus(msg) { const s = $("status"); s.textContent = msg || ""; s.hidden = !msg; }
   function flash(node, msg, isErr) {
     node.textContent = msg; node.className = "msg" + (isErr ? " err" : "");
-    clearTimeout(node._t); if (!isErr) node._t = setTimeout(() => { node.textContent = ""; }, 3000);
+    clearTimeout(node._t); if (!isErr) node._t = setTimeout(() => { node.textContent = ""; }, 3500);
   }
   function armConfirm(btn, label, action) {
     if (btn.dataset.armed) { action(); return; }
@@ -85,11 +95,58 @@
     return s;
   }
   function download(filename, text) {
+    if (DEMO) return false;
     const blob = new Blob([text], { type: "application/json" });
     const a = el("a", { href: URL.createObjectURL(blob), download: filename });
     document.body.append(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    return true;
   }
+
+  // ---------- popups ----------
+  function openSheet(id) {
+    const d = $(id);
+    if (d.open) return;
+    if (typeof d.showModal === "function") d.showModal(); else d.setAttribute("open", "");
+    const body = d.querySelector(".sheet-body"); if (body) body.scrollTop = 0;
+  }
+  function closeSheet(d) {
+    if (typeof d.close === "function") d.close(); else d.removeAttribute("open");
+  }
+  document.querySelectorAll("dialog.sheet").forEach((d) => {
+    d.querySelector("[data-close]").addEventListener("click", () => closeSheet(d));
+    // tap on the dimmed area outside the box closes it
+    d.addEventListener("click", (ev) => {
+      if (ev.target !== d) return;
+      const r = d.getBoundingClientRect();
+      if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) closeSheet(d);
+    });
+    d.addEventListener("close", () => {
+      if (d.id === "dlgFixed") { ui.editingFixed = null; ui.addingFixed = false; }
+      if (d.id === "dlgFixed" || d.id === "dlgVar") ui.peek = false; // 閉じたら隠した項目はまた見えなくなる
+      if (d.id === "dlgImp") ui.imp = null;
+      render();
+    });
+  });
+  // ポップアップの見出しを長押しすると、隠した項目の表示を切り替える（見た目の印は何もない）
+  function togglePeek() {
+    ui.peek = !ui.peek;
+    if (!ui.peek) { const f = data.fixed.find((x) => x.id === ui.editingFixed); if (f && f.hidden) ui.editingFixed = null; }
+    try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {}
+    render();
+  }
+  document.querySelectorAll("[data-hold]").forEach((h) => {
+    let timer = null, sx = 0, sy = 0;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    h.addEventListener("pointerdown", (ev) => { sx = ev.clientX; sy = ev.clientY; cancel(); timer = setTimeout(() => { timer = null; togglePeek(); }, 600); });
+    h.addEventListener("pointermove", (ev) => { if (timer && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 10) cancel(); });
+    ["pointerup", "pointerleave", "pointercancel"].forEach((t) => h.addEventListener(t, cancel));
+    h.addEventListener("contextmenu", (ev) => ev.preventDefault());
+  });
+  async function setHidden(x, hidden) { x.hidden = hidden; await save(); render(); }
+  $("openCats").addEventListener("click", () => openSheet("dlgCats"));
+  $("openVar").addEventListener("click", () => openSheet("dlgVar"));
+  $("openFixed").addEventListener("click", () => openSheet("dlgFixed"));
 
   // ---------- render ----------
   function render() {
@@ -102,8 +159,6 @@
     const total = sumFixed + sumVar;
 
     const t = $("total"); t.textContent = ""; t.append(el("small", null, total < 0 ? "-¥" : "¥"), document.createTextNode(Math.abs(Math.round(total)).toLocaleString("ja-JP")));
-    $("sumFixed").textContent = yen(sumFixed);
-    $("sumVar").textContent = yen(sumVar);
     const budget = Number(data.budget) > 0 ? Number(data.budget) : null;
     const scale = Math.max(total, budget || 0) || 1;
     $("barFixed").style.width = Math.max(0, sumFixed / scale * 100) + "%";
@@ -114,6 +169,13 @@
     else rest.textContent = "";
     $("budgetEdit").textContent = budget ? "変更" : "予算を設定";
 
+    // tiles: 金額は隠した項目も含めた合計、件数は見えている項目だけ
+    const expsShown = exps.filter(visible);
+    $("sumVar").textContent = yen(sumVar);
+    $("varCount").textContent = exps.filter((x) => !x.hidden).length + "件";
+    $("sumFixed").textContent = yen(sumFixed);
+    $("fixedCount").textContent = fixedNow.filter((f) => !f.hidden).length + "件";
+
     const chips = $("catChips"); chips.textContent = "";
     VAR_CATS.forEach((c) => {
       const b = el("button", { type: "button", "aria-pressed": String(ui.cat === c) }, c);
@@ -121,7 +183,8 @@
       chips.append(b);
     });
 
-    // breakdown
+    // category popup
+    $("dlgCatsSub").textContent = monthLabel(ym) + "・合計 " + yen(total);
     const byCat = {};
     exps.forEach((x) => { const c = x.category || "その他"; byCat[c] = (byCat[c] || 0) + (Number(x.amount) || 0); });
     const rows = [];
@@ -138,11 +201,12 @@
       cats.append(row);
     });
 
-    // expense list
+    // variable-cost popup
+    $("dlgVarSub").textContent = monthLabel(ym) + "・" + expsShown.length + "件・" + yen(sumVar);
     const list = $("expList"); list.textContent = "";
-    if (!exps.length) list.append(el("p", { class: "empty" }, "記録した支出が日付ごとに並びます。上のフォームから記録するか、明細CSVを取り込んでください。"));
+    if (!expsShown.length) list.append(el("p", { class: "empty" }, "この月の記録はまだありません。"));
     const byDay = {};
-    exps.forEach((x) => { (byDay[x.date] = byDay[x.date] || []).push(x); });
+    expsShown.forEach((x) => { (byDay[x.date] = byDay[x.date] || []).push(x); });
     Object.keys(byDay).sort().reverse().forEach((d) => {
       const items = byDay[d].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       const wd = "日月火水木金土"[new Date(d + "T00:00:00").getDay()];
@@ -151,43 +215,54 @@
         el("span", { class: "num" }, yen(items.reduce((a, x) => a + (Number(x.amount) || 0), 0))));
       list.append(head);
       items.forEach((x) => {
-        const it = el("div", { class: "item" });
+        const it = el("div", { class: "item" + (x.hidden ? " is-hidden" : "") });
         const main = el("div", { class: "main" });
         const nm = el("div", { class: "name" });
         const sel = catSelect(x.category || "その他");
-        sel.className = "tag"; sel.style.cssText = "width:auto;border:0;padding:0 4px;font-size:11px;background:var(--accent-soft);color:var(--accent)";
-        sel.setAttribute("aria-label", "カテゴリを変更");
+        sel.className = "tag"; sel.setAttribute("aria-label", "カテゴリを変更");
         sel.addEventListener("change", async () => { x.category = sel.value; await save(); render(); });
         nm.append(sel, document.createTextNode(" " + (x.memo || "")));
+        if (x.hidden) nm.append(el("span", { class: "hid-tag" }, "非表示"));
         main.append(nm);
         if (x.source) main.append(el("div", { class: "sub" }, "明細から取り込み"));
+        const acts = el("div", { class: "acts" });
+        // 隠した項目を目のボタンで出しているときだけ、元に戻すボタンを出す
+        if (x.hidden) {
+          const unhide = el("button", { class: "ghost", type: "button" }, "表示に戻す");
+          unhide.addEventListener("click", () => setHidden(x, false));
+          acts.append(unhide);
+        }
         const del = el("button", { class: "ghost danger", type: "button", "aria-label": "この支出を削除" }, "削除");
         del.addEventListener("click", () => armConfirm(del, "削除する", async () => {
           data.expenses = data.expenses.filter((e) => e.id !== x.id); await save(); render();
         }));
-        it.append(main, el("span", { class: "amt" }, yen(x.amount)), del);
+        acts.append(del);
+        it.append(main, el("span", { class: "amt" }, yen(x.amount)), acts);
         list.append(it);
       });
     });
 
-    // fixed costs
+    // fixed-cost popup
+    $("dlgFixedSub").textContent = monthLabel(ym) + "・" + fixedNow.filter(visible).length + "件";
     $("fixedAdd").disabled = ui.addingFixed;
     const editKey = ui.addingFixed ? "new" : ui.editingFixed;
-    if (editKey !== ui.editorKey) {
-      ui.editorKey = editKey;
+    const cacheKey = editKey ? editKey + "|" + ui.peek : null;
+    if (cacheKey !== ui.editorKey) {
+      ui.editorKey = cacheKey;
       ui.editorEl = editKey ? fixedEditor(editKey === "new" ? null : data.fixed.find((x) => x.id === editKey) || null) : null;
     }
     const nw = $("fixedNew"); nw.textContent = "";
     if (ui.addingFixed && ui.editorEl) nw.append(ui.editorEl);
     const fl = $("fixedList"); fl.textContent = "";
-    if (!data.fixed.length) fl.append(el("p", { class: "empty" }, "毎月決まって払うサブスクや通信費を「追加」から登録すると、毎月の合計に自動で入ります。"));
-    data.fixed.slice().sort((a, b) => (activeIn(b, ym) - activeIn(a, ym)) || (Number(b.amount) - Number(a.amount))).forEach((f) => {
+    if (!data.fixed.length) fl.append(el("p", { class: "empty" }, "毎月払うサブスクや通信費を追加すると、毎月の合計に自動で入ります。"));
+    data.fixed.filter(visible).sort((a, b) => (activeIn(b, ym) - activeIn(a, ym)) || (Number(b.amount) - Number(a.amount))).forEach((f) => {
       if (ui.editingFixed === f.id && ui.editorEl) { fl.append(ui.editorEl); return; }
       const on = activeIn(f, ym);
-      const it = el("div", { class: "item" }); if (!on) it.style.opacity = ".5";
+      const it = el("div", { class: "item" + (f.hidden ? " is-hidden" : "") }); if (!on) it.style.opacity = ".5";
       const main = el("div", { class: "main" });
       const nm = el("div", { class: "name" });
       nm.append(el("span", { class: "tag" }, f.category || "その他"), document.createTextNode(f.name || ""));
+      if (f.hidden) nm.append(el("span", { class: "hid-tag" }, "非表示"));
       const sub = [f.day ? "毎月" + f.day + "日 引き落とし" : "引き落とし日 未登録"];
       if (f.note) sub.push(f.note);
       if (f.end) sub.push(monthLabel(f.end) + "まで");
@@ -201,17 +276,13 @@
     $("fixedMonth").textContent = yen(sumFixed);
     $("fixedYear").textContent = yen(sumFixed * 12);
 
-    // backup info
-    const info = $("backupInfo");
-    const hasData = data.fixed.length || data.expenses.length;
-    if (data.lastBackup) {
-      const days = Math.floor((Date.now() - data.lastBackup) / 864e5);
-      info.textContent = "記録はこのスマホの中だけに保存されます。最後のバックアップは" + (days === 0 ? "今日" : days + "日前") + "です。";
-      info.className = days > 30 ? "notice" : "hint";
-    } else if (hasData) {
-      info.textContent = "記録はこのスマホの中だけに保存されます。まだ一度もバックアップしていません。機種変更やブラウザのデータ削除に備えて書き出してください。";
-      info.className = "notice";
-    }
+    // backup warning: shown only when a backup is overdue
+    const warn = $("backupWarn");
+    const oldest = data.expenses.concat(data.fixed).reduce((a, x) => Math.min(a, x.createdAt || Infinity), Infinity);
+    const since = data.lastBackup || (isFinite(oldest) ? oldest : null);
+    const days = since ? Math.floor((Date.now() - since) / 864e5) : 0;
+    warn.hidden = DEMO || days < 30;
+    if (!warn.hidden) warn.textContent = data.lastBackup ? "最後のバックアップから" + days + "日たっています。" : "まだバックアップしていません。";
   }
 
   function fixedEditor(f) {
@@ -226,6 +297,8 @@
     const note = el("input", { id: "fxNote-" + k, type: "text", maxlength: "60", placeholder: "プラン名など" }); note.value = f && f.note ? f.note : "";
     const r1 = el("div", { class: "row2" }); r1.append(mk("金額（円/月）", amount), mk("引き落とし日", day));
     const r2 = el("div", { class: "row2" }); r2.append(mk("種類", cat), mk("メモ", note));
+    const hidBox = el("input", { type: "checkbox", id: "fxHid-" + k }); hidBox.checked = !!(f && f.hidden);
+    const hidLbl = el("label", { class: "check", for: "fxHid-" + k }); hidLbl.append(hidBox, document.createTextNode("一覧に表示しない"));
     const err = el("div", { class: "msg err", role: "status" });
     const acts = el("div", { class: "actions" });
     const close = () => { ui.editingFixed = null; ui.addingFixed = false; render(); };
@@ -246,7 +319,9 @@
     const cancel = el("button", { type: "button", class: "ghost" }, "やめる");
     cancel.addEventListener("click", close);
     acts.append(cancel, el("button", { type: "submit", class: "primary" }, f ? "保存" : "追加"));
-    box.append(mk("サービス名", name), r1, r2, err, acts);
+    box.append(mk("サービス名", name), r1, r2);
+    if (ui.peek) box.append(hidLbl); // 隠す設定は、目のボタンで隠した項目を出しているときだけ出す
+    box.append(err, acts);
     box.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const a = Math.round(Number(amount.value));
@@ -254,9 +329,12 @@
       if (!name.value.trim()) { err.textContent = "サービス名を入れてください。"; return; }
       if (!(a >= 0)) { err.textContent = "金額を0以上の数字で入れてください。"; return; }
       if (d != null && (d < 1 || d > 31)) { err.textContent = "引き落とし日は1〜31で入れてください。"; return; }
-      const body = { name: name.value.trim(), amount: a, day: d, category: cat.value, note: note.value.trim() };
+      const body = { name: name.value.trim(), amount: a, day: d, category: cat.value, note: note.value.trim(), hidden: hidBox.checked };
       if (f) Object.assign(f, body);
-      else data.fixed.push(Object.assign(body, { id: uid(), start: ui.ym, end: null, createdAt: Date.now() }));
+      else {
+        if (matchesHideRule(body.name)) body.hidden = true;
+        data.fixed.push(Object.assign(body, { id: uid(), start: ui.ym, end: null, createdAt: Date.now() }));
+      }
       await save(); close();
     });
     setTimeout(() => { try { name.focus(); } catch (e) {} }, 0);
@@ -281,7 +359,8 @@
     const a = Math.round(Number($("expAmount").value)), d = $("expDate").value;
     if (!a) { flash($("expMsg"), "金額を入れてください。返金はマイナスで入れられます。", true); return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { flash($("expMsg"), "日付を選んでください。", true); return; }
-    data.expenses.push({ id: uid(), amount: a, date: d, category: ui.cat, memo: $("expMemo").value.trim(), createdAt: Date.now() });
+    const memo = $("expMemo").value.trim();
+    data.expenses.push({ id: uid(), amount: a, date: d, category: ui.cat, memo, hidden: matchesHideRule(memo), createdAt: Date.now() });
     if (await save()) {
       $("expAmount").value = ""; $("expMemo").value = "";
       if (d.slice(0, 7) !== ui.ym) ui.ym = d.slice(0, 7);
@@ -291,9 +370,10 @@
 
   // ---------- backup ----------
   $("exportBtn").addEventListener("click", async () => {
+    if (DEMO) { flash($("dataMsg"), "デモ版では書き出しません。"); return; }
     data.lastBackup = Date.now(); await save();
     download("kakeibo-backup-" + todayStr + ".json", JSON.stringify(Object.assign({ app: "kakeibo" }, data), null, 1));
-    flash($("dataMsg"), "バックアップを書き出しました。ダウンロードフォルダを確認してください。"); render();
+    flash($("dataMsg"), "書き出しました。ダウンロードフォルダに保存されています。"); render();
   });
   $("importFile").addEventListener("change", async (ev) => {
     const file = ev.target.files && ev.target.files[0]; ev.target.value = "";
@@ -306,28 +386,29 @@
     const haveF = new Set(data.fixed.map((x) => x.id)), haveE = new Set(data.expenses.map((x) => x.id));
     const nf = incoming.fixed.filter((x) => x && x.id && !haveF.has(x.id));
     const ne = incoming.expenses.filter((x) => x && x.id && !haveE.has(x.id));
+    nf.forEach((f) => { if (f.hidden == null && matchesHideRule(f.name)) f.hidden = true; });
+    ne.forEach((x) => { if (x.hidden == null && matchesHideRule(x.memo)) x.hidden = true; });
     data.fixed.push(...nf); data.expenses.push(...ne);
     if (data.budget == null && incoming.budget != null) data.budget = incoming.budget;
     await save(); render();
-    flash($("dataMsg"), "固定費" + nf.length + "件、支出" + ne.length + "件を追加しました。すでにあるものはそのままです。");
+    flash($("dataMsg"), "固定費" + nf.length + "件、支出" + ne.length + "件を追加しました。");
   });
 
   // ---------- CSV import ----------
-  function fillSelect(sel, labels, value, allowNone) {
+  function fillSelect(sel, labels, value) {
     sel.textContent = "";
-    if (allowNone) sel.append(el("option", { value: "-1" }, "なし"));
     labels.forEach((l, i) => { const o = el("option", { value: String(i) }, l); if (i === value) o.selected = true; sel.append(o); });
-    if (value === -1 && allowNone) sel.value = "-1";
   }
   function existingKeys() { return data.expenses.map((x) => x.key || CSV.entryKey(x.date, x.amount, x.memo || "")); }
   function rebuildCandidates() {
     const imp = ui.imp;
-    imp.cands = CSV.buildCandidates(imp.analysis, imp.map, { existingKeys: existingKeys(), fixedNames: data.fixed.filter((f) => !f.end).map((f) => f.name), fixed: data.fixed.filter((f) => !f.end) });
+    const active = data.fixed.filter((f) => !f.end);
+    imp.cands = CSV.buildCandidates(imp.analysis, imp.map, { existingKeys: existingKeys(), fixedNames: active.map((f) => f.name), fixed: active });
+    imp.cands.forEach((c) => { c.hidden = matchesHideRule(c.desc); });
     renderImport();
   }
   function renderImport() {
     const imp = ui.imp;
-    $("impArea").hidden = !imp;
     if (!imp) return;
     const m = imp.map, labels = imp.analysis.labels;
     $("impKind").value = m.kind;
@@ -338,7 +419,7 @@
     $("impAmountWrap").hidden = m.kind !== "card";
     $("impOutWrap").hidden = m.kind !== "bank";
     const list = $("impList"); list.textContent = "";
-    if (!imp.cands.length) list.append(el("p", { class: "empty" }, "取り込める行が見つかりませんでした。上の列の選び方を変えてみてください。"));
+    if (!imp.cands.length) list.append(el("p", { class: "empty" }, "取り込める行が見つかりませんでした。列の選び方を変えてみてください。"));
     imp.cands.forEach((c, i) => {
       const row = el("div", { class: "imp-row" + (c.checked ? "" : " off") });
       const cb = el("input", { type: "checkbox", id: "impc-" + i, "aria-label": c.desc + "を取り込む" }); cb.checked = c.checked;
@@ -348,7 +429,10 @@
       const meta = el("div", { class: "meta" });
       const sel = catSelect(c.category); sel.setAttribute("aria-label", "カテゴリ");
       sel.addEventListener("change", () => { c.category = sel.value; });
-      meta.append(el("span", { class: "num" }, c.date.slice(5).replace("-", "/")), sel);
+      const hb = el("input", { type: "checkbox", id: "imph-" + i }); hb.checked = !!c.hidden;
+      hb.addEventListener("change", () => { c.hidden = hb.checked; });
+      const hl = el("label", { class: "check", for: "imph-" + i }); hl.append(hb, document.createTextNode("隠す"));
+      meta.append(el("span", { class: "num" }, c.date.slice(5).replace("-", "/")), sel, hl);
       main.append(meta);
       if (c.note) main.append(el("span", { class: "note" }, c.note));
       row.append(cb, main, el("span", { class: "amt" }, yen(c.amount)));
@@ -366,17 +450,15 @@
     if (!file) return;
     try {
       const { text, encoding } = CSV.decode(await file.arrayBuffer());
-      const rows = CSV.parseCSV(text);
-      const analysis = CSV.analyze(rows);
-      if (!analysis.rows.length) { ui.imp = null; renderImport(); flash($("impResult"), "日付の入った行が見つかりませんでした。明細のCSVか確認してください。", true); return; }
+      const analysis = CSV.analyze(CSV.parseCSV(text));
+      if (!analysis.rows.length) { flash($("impResult"), "日付の入った行が見つかりませんでした。明細のCSVか確認してください。", true); return; }
       flash($("impResult"), "");
       ui.imp = { file: file.name, analysis, map: Object.assign({}, analysis.map), cands: [] };
-      $("impInfo").textContent = file.name + "（" + encoding + "・" + analysis.rows.length + "行）。列は自動で選んでいます。金額がずれていたら列を選び直してください。";
-      $("impInfo").className = "msg";
+      $("impInfo").textContent = file.name + "・" + encoding + "・" + analysis.rows.length + "行";
       rebuildCandidates();
-      $("impPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+      openSheet("dlgImp");
     } catch (e) {
-      ui.imp = null; renderImport(); flash($("impResult"), "ファイルを読み込めませんでした。CSVファイルか確認してください。", true);
+      flash($("impResult"), "ファイルを読み込めませんでした。CSVファイルか確認してください。", true);
     }
   });
   const onMap = (key, sel) => sel.addEventListener("change", () => { ui.imp.map[key] = Number(sel.value); rebuildCandidates(); });
@@ -387,30 +469,36 @@
     if (m.kind === "card" && m.amount === -1) m.amount = m.out;
     rebuildCandidates();
   });
-  $("impCancel").addEventListener("click", () => { ui.imp = null; renderImport(); });
   $("impGo").addEventListener("click", async () => {
     const sel = ui.imp.cands.filter((c) => c.checked);
     const t = Date.now();
-    sel.forEach((c, i) => data.expenses.push({ id: uid(), amount: c.amount, date: c.date, category: c.category, memo: c.desc.normalize("NFKC"), createdAt: t + i, source: "csv", key: c.key }));
+    sel.forEach((c, i) => data.expenses.push({ id: uid(), amount: c.amount, date: c.date, category: c.category, memo: c.desc.normalize("NFKC"), hidden: !!c.hidden, createdAt: t + i, source: "csv", key: c.key }));
     if (await save()) {
       const months = Array.from(new Set(sel.map((c) => c.date.slice(0, 7)))).sort();
       if (months.length) ui.ym = months[months.length - 1];
-      ui.imp = null; renderImport(); render();
-      flash($("impResult"), sel.length + "件・" + yen(sel.reduce((a, c) => a + c.amount, 0)) + "を取り込みました。" + (months.length ? monthLabel(ui.ym) + "を表示しています。" : ""));
+      closeSheet($("dlgImp")); render();
+      flash($("impResult"), sel.length + "件・" + yen(sel.reduce((a, c) => a + c.amount, 0)) + "を取り込みました。");
     }
   });
 
   // ---------- start ----------
+  $("demoNote").hidden = !DEMO;
+  render();
   (async () => {
     await load();
+    // すでに記録してある分にも、一度だけ隠すルールを当てる
+    if (!data.rulesApplied) {
+      data.expenses.forEach((x) => { if (matchesHideRule(x.memo)) x.hidden = true; });
+      data.fixed.forEach((f) => { if (matchesHideRule(f.name)) f.hidden = true; });
+      data.rulesApplied = 1; await save();
+    }
     if (storageMode === "none") setStatus("このブラウザでは保存できないため、閉じると記録が消えます。");
     else if (storageMode === "ls") setStatus("簡易保存モードで動いています。こまめにバックアップしてください。");
-    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
+    if (!DEMO) { try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {} }
     render();
   })();
-  render();
 
-  if ("serviceWorker" in navigator) {
+  if (!DEMO && "serviceWorker" in navigator) {
     window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
   }
 })();

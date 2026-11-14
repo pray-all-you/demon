@@ -9,23 +9,33 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<!--STYLE-->
 <style>
-/* Layout: one narrow column, phone first — summary, entry form, breakdown, entries, fixed costs, data */
+/* Layout: one narrow column — summary, entry form, two summary tiles, CSV, data. Detail lists open as centered popups. */
 :root {
   --bg: #f2f4f8; --surface: #ffffff; --ink: #17202b; --muted: #5d6a7b; --line: #dce2ea;
   --accent: #3446a8; --accent-ink: #ffffff; --accent-soft: #e6e9f7;
   --fixed: #6b4fc0; --var: #0d8577; --danger: #b93a33; --warn-soft: #fbf0dc; --warn-ink: #7a5310;
+  --scrim: rgba(12, 18, 28, .48);
   --font-text: "Noto Sans JP", "Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
   --font-num: "Roboto", "Segoe UI", system-ui, sans-serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0e131a; --surface: #161d26; --ink: #e6ebf1; --muted: #93a0b1; --line: #263140;
     --accent: #93a1ff; --accent-ink: #0e131a; --accent-soft: #232b4a;
     --fixed: #a994f2; --var: #3cc4b2; --danger: #ff7c73; --warn-soft: #3a2e17; --warn-ink: #f3cf8a;
+    --scrim: rgba(0, 0, 0, .62);
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0e131a; --surface: #161d26; --ink: #e6ebf1; --muted: #93a0b1; --line: #263140;
+  --accent: #93a1ff; --accent-ink: #0e131a; --accent-soft: #232b4a;
+  --fixed: #a994f2; --var: #3cc4b2; --danger: #ff7c73; --warn-soft: #3a2e17; --warn-ink: #f3cf8a;
+  --scrim: rgba(0, 0, 0, .62);
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -36,8 +46,8 @@ body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-top: calc(16px + env(safe-area-inset-top, 0px));
-  padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
-  display: flex; flex-direction: column; gap: 16px;
+  padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; gap: 14px;
 }
 .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: .02em; }
@@ -47,7 +57,7 @@ h2 { font-size: 15px; margin: 0; font-weight: 700; }
 .month output { font-family: var(--font-num); font-weight: 600; font-size: 16px; min-width: 7.5em; text-align: center; }
 button, .btn {
   font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--surface);
-  border-radius: 8px; padding: 6px 12px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+  border-radius: 8px; padding: 6px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none;
 }
 button:focus-visible, input:focus-visible, select:focus-visible, .btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 button.icon { width: 40px; height: 40px; padding: 0; font-size: 20px; line-height: 1; }
@@ -56,22 +66,33 @@ button.ghost { border-color: transparent; background: transparent; color: var(--
 button.danger, .danger { color: var(--danger); }
 button:disabled { opacity: .45; cursor: default; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.panel.compact { padding: 12px 16px; gap: 10px; }
 .notice { margin: 0; font-size: 13px; color: var(--warn-ink); background: var(--warn-soft); border-radius: 8px; padding: 8px 12px; }
 .label { font-size: 12px; color: var(--muted); letter-spacing: .06em; }
-.hint { font-size: 13px; color: var(--muted); margin: 0; }
 
+.sum-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pill { border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft); font-weight: 500; }
 .total { font-family: var(--font-num); font-size: 40px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .total small { font-size: 20px; margin-right: 2px; }
-.split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.split > div { display: flex; flex-direction: column; gap: 2px; }
-.split .v { font-family: var(--font-num); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .bar { height: 10px; border-radius: 5px; background: var(--line); display: flex; overflow: hidden; }
 .bar span { display: block; height: 100%; }
 .budget-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 14px; }
 .budget-row .rest { font-family: var(--font-num); font-weight: 600; font-variant-numeric: tabular-nums; }
 .over { color: var(--danger); }
 .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* the two tiles that open the lists */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tile {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; min-width: 0;
+}
+.tile .t-label { font-size: 12px; color: var(--muted); letter-spacing: .06em; display: flex; align-items: center; width: 100%; }
+.tile .t-label::after { content: "›"; margin-left: auto; font-size: 18px; line-height: 1; color: var(--muted); }
+.tile .t-val { font-family: var(--font-num); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tile .t-sub { font-size: 12px; color: var(--muted); }
+.tile.var { border-top: 3px solid var(--var); }
+.tile.fixed { border-top: 3px solid var(--fixed); }
 
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field label { font-size: 12px; color: var(--muted); }
@@ -83,9 +104,41 @@ input.amount { font-family: var(--font-num); font-size: 18px; font-variant-numer
 .chips button { border-radius: 999px; padding: 4px 12px; font-size: 13px; }
 .chips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .msg { font-size: 13px; min-height: 1.2em; color: var(--muted); }
+.msg:empty { min-height: 0; }
 .msg.err { color: var(--danger); }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
+.file-btn { position: relative; overflow: hidden; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
 
-.cats { display: flex; flex-direction: column; gap: 8px; }
+/* popups */
+dialog.sheet {
+  border: 0; padding: 0; background: var(--surface); color: var(--ink);
+  width: min(520px, calc(100vw - 32px)); max-height: min(82vh, 760px);
+  border-radius: 16px; box-shadow: 0 18px 48px rgba(0,0,0,.28);
+  display: none; flex-direction: column; overflow: hidden;
+}
+dialog.sheet[open] { display: flex; }
+dialog.sheet::backdrop { background: var(--scrim); }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 12px 10px 18px; border-bottom: 1px solid var(--line); }
+.sheet-head h2 { font-size: 16px; }
+.sheet-head .sub { font-size: 12px; color: var(--muted); font-family: var(--font-num); }
+button.close { width: 36px; height: 36px; padding: 0; border-radius: 50%; border: 0; background: var(--bg); font-size: 18px; line-height: 1; color: var(--ink); flex: none; }
+[data-hold] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.item.is-hidden .main, .item.is-hidden .amt { opacity: .55; }
+.item .acts { display: flex; flex-direction: column; align-items: flex-end; gap: 0; }
+.item .acts button { padding: 2px 6px; font-size: 13px; }
+.hid-tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--line); color: var(--muted); margin-left: 6px; vertical-align: 1px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.check input { width: 18px; height: 18px; }
+.imp-row .check { font-size: 12px; }
+.sheet-body { padding: 12px 18px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.sheet-foot { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.sheet[open] { animation: pop .16s ease-out; }
+  @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+}
+
+.cats { display: flex; flex-direction: column; gap: 10px; }
 .cat { display: grid; grid-template-columns: 6.5em 1fr 6em; gap: 10px; align-items: center; font-size: 13px; }
 .cat .track { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
 .cat .track span { display: block; height: 100%; border-radius: 4px; }
@@ -93,24 +146,21 @@ input.amount { font-family: var(--font-num); font-size: 18px; font-variant-numer
 
 .list { display: flex; flex-direction: column; }
 .day { font-size: 12px; color: var(--muted); padding: 10px 0 4px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+.list > .day:first-child { padding-top: 0; }
 .item { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); min-width: 0; }
 .item .main { min-width: 0; }
 .item .name { font-weight: 500; overflow-wrap: anywhere; }
 .item .sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .item .amt { font-family: var(--font-num); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
 .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); margin-right: 6px; }
+select.tag { width: auto; border: 0; padding: 0 4px; }
 .empty { color: var(--muted); font-size: 14px; padding: 8px 0; margin: 0; }
-.foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); width: 100%; }
 .foot b { color: var(--ink); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .edit-box { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-block: 8px; border-radius: 10px; background: var(--bg); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
-.file-btn { position: relative; overflow: hidden; }
-.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
 
-/* CSV import */
 .imp-map { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.imp-list { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; border-top: 1px solid var(--line); }
 .imp-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .imp-row.off .main, .imp-row.off .amt { opacity: .5; }
 .imp-row .main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -119,13 +169,14 @@ input.amount { font-family: var(--font-num); font-size: 18px; font-variant-numer
 .imp-row select { width: auto; padding: 2px 6px; font-size: 13px; }
 .imp-row .note { font-size: 12px; color: var(--warn-ink); background: var(--warn-soft); border-radius: 4px; padding: 0 6px; align-self: flex-start; }
 .imp-row .amt { font-family: var(--font-num); font-weight: 600; font-variant-numeric: tabular-nums; }
-.sticky-act { position: sticky; bottom: 0; background: var(--surface); padding-top: 8px; display: flex; gap: 8px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
-@media (prefers-reduced-motion: no-preference) { .bar span, .cat .track span { transition: width .3s ease; } }
 @media (max-width: 380px) { .imp-map { grid-template-columns: 1fr; } }
 </style>
+<!--/STYLE-->
 </head>
 <body>
+<!--BODY-->
 <div class="wrap">
+  <p class="notice" id="demoNote" hidden>デモ版です。表示しているのは見本の数字で、入力しても保存されません。</p>
   <header class="top">
     <h1>毎月の家計簿</h1>
     <div class="month" aria-label="表示する月">
@@ -138,13 +189,12 @@ input.amount { font-family: var(--font-num); font-size: 18px; font-variant-numer
   <p class="notice" id="status" hidden></p>
 
   <section class="panel" aria-labelledby="sumTitle">
-    <div class="label" id="sumTitle">この月の支出</div>
+    <div class="sum-head">
+      <div class="label" id="sumTitle">この月の支出</div>
+      <button class="pill" id="openCats" aria-haspopup="dialog">カテゴリ別</button>
+    </div>
     <div class="total" id="total"><small>¥</small>0</div>
     <div class="bar" aria-hidden="true"><span id="barFixed" style="width:0;background:var(--fixed)"></span><span id="barVar" style="width:0;background:var(--var)"></span></div>
-    <div class="split">
-      <div><span class="label"><span class="dot" style="background:var(--fixed)"></span>固定費</span><span class="v" id="sumFixed">¥0</span></div>
-      <div><span class="label"><span class="dot" style="background:var(--var)"></span>変動費</span><span class="v" id="sumVar">¥0</span></div>
-    </div>
     <div class="budget-row" id="budgetView">
       <span>予算 <span class="num" id="budgetVal">未設定</span></span>
       <span class="rest" id="budgetRest"></span>
@@ -166,59 +216,33 @@ input.amount { font-family: var(--font-num); font-size: 18px; font-variant-numer
         <div class="field"><label for="expDate">日付</label><input id="expDate" type="date" required></div>
       </div>
       <div class="field"><span class="label">カテゴリ</span><div class="chips" id="catChips" role="group" aria-label="カテゴリ"></div></div>
-      <div class="field"><label for="expMemo">メモ（任意）</label><input id="expMemo" type="text" maxlength="60" placeholder="松屋 牛めし並盛"></div>
-      <div class="msg" id="expMsg" role="status"></div>
+      <div class="field"><label for="expMemo">メモ（任意）</label><input id="expMemo" type="text" maxlength="60" placeholder="松屋 牛めし並盛"></div>      <div class="msg" id="expMsg" role="status"></div>
       <button type="submit" class="primary">記録する</button>
     </form>
   </section>
 
-  <section class="panel" aria-labelledby="catTitle">
-    <h2 id="catTitle">カテゴリ別</h2>
-    <div class="cats" id="cats"></div>
-  </section>
+  <div class="tiles">
+    <button class="tile var" id="openVar" aria-haspopup="dialog">
+      <span class="t-label">変動費</span>
+      <span class="t-val" id="sumVar">¥0</span>
+      <span class="t-sub" id="varCount">0件</span>
+    </button>
+    <button class="tile fixed" id="openFixed" aria-haspopup="dialog">
+      <span class="t-label">固定費</span>
+      <span class="t-val" id="sumFixed">¥0</span>
+      <span class="t-sub" id="fixedCount">0件</span>
+    </button>
+  </div>
 
-  <section class="panel" aria-labelledby="listTitle">
-    <h2 id="listTitle">この月の変動費</h2>
-    <div class="list" id="expList"></div>
-  </section>
-
-  <section class="panel" aria-labelledby="fixedTitle">
-    <div class="top">
-      <h2 id="fixedTitle">固定費（毎月）</h2>
-      <button id="fixedAdd">追加</button>
-    </div>
-    <div id="fixedNew"></div>
-    <div class="list" id="fixedList"></div>
-    <div class="foot"><span>この月の固定費 <b id="fixedMonth">¥0</b></span><span>年間にすると <b id="fixedYear">¥0</b></span></div>
-  </section>
-
-  <section class="panel" aria-labelledby="impTitle" id="impPanel">
+  <section class="panel compact" aria-labelledby="impTitle">
     <h2 id="impTitle">明細CSVの取り込み</h2>
-    <p class="hint">カード会社・銀行のWeb明細からダウンロードしたCSVを選ぶと、取り込む前に一覧で確認できます。</p>
     <div class="btnrow"><label class="btn file-btn" for="csvFile">CSVファイルを選ぶ<input type="file" id="csvFile" accept=".csv,text/csv,text/plain"></label></div>
     <div class="msg" id="impResult" role="status"></div>
-    <div id="impArea" hidden>
-      <div class="msg" id="impInfo"></div>
-      <div class="field"><label for="impKind">明細の種類</label>
-        <select id="impKind"><option value="card">カードの利用明細</option><option value="bank">銀行の入出金明細（出金だけ取り込む）</option></select>
-      </div>
-      <div class="imp-map">
-        <div class="field"><label for="impDate">日付の列</label><select id="impDate"></select></div>
-        <div class="field"><label for="impDesc">内容の列</label><select id="impDesc"></select></div>
-        <div class="field" id="impAmountWrap"><label for="impAmount">金額の列</label><select id="impAmount"></select></div>
-        <div class="field" id="impOutWrap" hidden><label for="impOut">出金の列</label><select id="impOut"></select></div>
-      </div>
-      <div class="imp-list" id="impList"></div>
-      <div class="sticky-act">
-        <span class="msg" id="impCount"></span>
-        <span class="btnrow"><button type="button" class="ghost" id="impCancel">やめる</button><button type="button" class="primary" id="impGo">取り込む</button></span>
-      </div>
-    </div>
   </section>
 
-  <section class="panel" aria-labelledby="dataTitle">
+  <section class="panel compact" aria-labelledby="dataTitle">
     <h2 id="dataTitle">データの保存</h2>
-    <p class="hint" id="backupInfo">記録はこのスマホの中だけに保存されます。機種変更やブラウザのデータ削除に備えて、ときどき書き出してください。</p>
+    <p class="notice" id="backupWarn" hidden></p>
     <div class="btnrow">
       <button type="button" id="exportBtn">バックアップを書き出す</button>
       <label class="btn file-btn" for="importFile">バックアップを読み込む<input type="file" id="importFile" accept=".json,application/json"></label>
@@ -226,6 +250,47 @@ input.amount { font-family: var(--font-num); font-size: 18px; font-variant-numer
     <div class="msg" id="dataMsg" role="status"></div>
   </section>
 </div>
+
+<dialog class="sheet" id="dlgCats" aria-labelledby="dlgCatsTitle">
+  <div class="sheet-head"><div><h2 id="dlgCatsTitle">カテゴリ別</h2><div class="sub" id="dlgCatsSub"></div></div><button class="close" data-close aria-label="閉じる">✕</button></div>
+  <div class="sheet-body"><div class="cats" id="cats"></div></div>
+</dialog>
+
+<dialog class="sheet" id="dlgVar" aria-labelledby="dlgVarTitle">
+  <div class="sheet-head"><div data-hold><h2 id="dlgVarTitle">この月の変動費</h2><div class="sub" id="dlgVarSub"></div></div><button class="close" data-close aria-label="閉じる">✕</button></div>
+  <div class="sheet-body"><div class="list" id="expList"></div></div>
+</dialog>
+
+<dialog class="sheet" id="dlgFixed" aria-labelledby="dlgFixedTitle">
+  <div class="sheet-head"><div data-hold><h2 id="dlgFixedTitle">固定費（毎月）</h2><div class="sub" id="dlgFixedSub"></div></div><button class="close" data-close aria-label="閉じる">✕</button></div>
+  <div class="sheet-body">
+    <button id="fixedAdd" style="align-self:flex-start">＋ 追加</button>
+    <div id="fixedNew"></div>
+    <div class="list" id="fixedList"></div>
+  </div>
+  <div class="sheet-foot"><div class="foot"><span>この月 <b id="fixedMonth">¥0</b></span><span>年間 <b id="fixedYear">¥0</b></span></div></div>
+</dialog>
+
+<dialog class="sheet" id="dlgImp" aria-labelledby="dlgImpTitle">
+  <div class="sheet-head"><div><h2 id="dlgImpTitle">取り込む明細の確認</h2><div class="sub" id="impInfo"></div></div><button class="close" data-close aria-label="閉じる">✕</button></div>
+  <div class="sheet-body">
+    <div class="field"><label for="impKind">明細の種類</label>
+      <select id="impKind"><option value="card">カードの利用明細</option><option value="bank">銀行の入出金明細（出金だけ取り込む）</option></select>
+    </div>
+    <div class="imp-map">
+      <div class="field"><label for="impDate">日付の列</label><select id="impDate"></select></div>
+      <div class="field"><label for="impDesc">内容の列</label><select id="impDesc"></select></div>
+      <div class="field" id="impAmountWrap"><label for="impAmount">金額の列</label><select id="impAmount"></select></div>
+      <div class="field" id="impOutWrap" hidden><label for="impOut">出金の列</label><select id="impOut"></select></div>
+    </div>
+    <div class="list" id="impList"></div>
+  </div>
+  <div class="sheet-foot">
+    <span class="msg" id="impCount"></span>
+    <button type="button" class="primary" id="impGo">取り込む</button>
+  </div>
+</dialog>
+<!--/BODY-->
 <script src="csv.js"></script>
 <script src="app.js"></script>
 </body>

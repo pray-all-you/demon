@@ -1,5 +1,5 @@
 // オフラインで動かすためのキャッシュ。ファイルを更新したら VERSION を上げる。
-const VERSION = "kakeibo-v2";
+const VERSION = "kakeibo-v3";
 const FILES = ["./", "index.html", "app.js", "csv.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png"];
 
 self.addEventListener("install", (e) => {
